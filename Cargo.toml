@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+actix-web = "4.8.0"
 aes-gcm = { version = "0.10.3", features = ["std"] }
 anyhow = "1.0.86"
+const_format = "0.2.32"
 rand = "0.8.5"
+serde = { version = "1.0.203", features = ["derive"] }
 sha2 = "0.10.8"
 tokio = { version = "1.38.0", features = ["full"] }
 x25519-dalek = "2.0.1"
