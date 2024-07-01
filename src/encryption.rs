@@ -21,6 +21,15 @@ impl KeyPair {
     pub fn initial_public_message(&self) -> &[u8; 32] {
         self.public.as_bytes()
     }
+    pub fn handshake(self, other_publickey: &PublicKey) -> Encryptor {
+        let shared = self.secret.diffie_hellman(other_publickey);
+        let shared_secret = shared.as_bytes();
+
+        let key = Sha256::digest(shared_secret);
+        let cipher = Aes256Gcm::new_from_slice(&key).expect("Key is valid");
+
+        Encryptor { cipher }
+    }
 }
 
 pub struct Encryptor {
@@ -28,16 +37,6 @@ pub struct Encryptor {
 }
 
 impl Encryptor {
-    pub fn new(other_publickey: &PublicKey, keypair: KeyPair) -> Self {
-        let shared = keypair.secret.diffie_hellman(other_publickey);
-        let shared_secret = shared.as_bytes();
-
-        let key = Sha256::digest(shared_secret);
-        let cipher = Aes256Gcm::new_from_slice(&key).expect("Key is valid");
-
-        Self { cipher }
-    }
-
     pub fn encrypt(&self, bytes: &[u8]) -> Vec<u8> {
         let mut nonce_bytes = [0u8; NONCE_LENGTH];
         OsRng.fill_bytes(&mut nonce_bytes);
@@ -56,32 +55,33 @@ impl Encryptor {
             anyhow::bail!("Invalid message for encryption")
         }
 
-        let nonce = Nonce::from_slice(&bytes[0..12]);
-        let message = &bytes[12..];
+        let nonce = Nonce::from_slice(&bytes[0..NONCE_LENGTH]);
+        let message = &bytes[NONCE_LENGTH..];
 
         let result = self.cipher.decrypt(nonce, message)?;
         Ok(result)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn end_to_end() -> Result<()> {
-        let alice_keypair = KeyPair::new();
-        let bob_keypair = KeyPair::new();
-        let alice_pub = alice_keypair.public;
-        let bob_pub = bob_keypair.public;
+        let alice = KeyPair::new();
+        let bob = KeyPair::new();
+        let alice_pub = alice.public;
+        let bob_pub = bob.public;
 
-        let alice_encryptor = Encryptor::new(&bob_pub, alice_keypair);
-        let bob_encryptor = Encryptor::new(&alice_pub, bob_keypair);
+        let alice = alice.handshake(&bob_pub);
+        let bob = bob.handshake(&alice_pub);
 
         let message = "Hello world!";
 
-        let encrypted = alice_encryptor.encrypt(message.as_bytes());
+        let encrypted = alice.encrypt(message.as_bytes());
 
-        let decrypted = bob_encryptor.decrypt(encrypted.as_slice())?;
+        let decrypted = bob.decrypt(encrypted.as_slice())?;
 
         assert_eq!(decrypted.as_slice(), message.as_bytes());
         Ok(())
