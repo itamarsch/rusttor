@@ -1,17 +1,11 @@
-use std::{collections::BTreeSet, net::Ipv4Addr};
+use std::collections::BTreeSet;
 
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use const_format::concatcp;
-use serde::{Deserialize, Serialize};
+use rustor::tor::Node;
 use tokio::sync::Mutex;
 
 const PORT: u16 = 30000;
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd, Ord, Eq)]
-struct Node {
-    ip: Ipv4Addr,
-    port: u16,
-}
 
 #[derive(Default)]
 struct AppState {
