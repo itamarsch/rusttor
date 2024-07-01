@@ -6,18 +6,12 @@ use x25519_dalek::{EphemeralSecret, PublicKey};
 
 const NONCE_LENGTH: usize = 12;
 
-struct KeyPair {
+pub struct KeyPair {
     secret: EphemeralSecret,
     public: PublicKey,
 }
 
 impl KeyPair {
-    pub fn new() -> Self {
-        let secret = EphemeralSecret::random_from_rng(OsRng);
-        let public = PublicKey::from(&secret);
-        Self { secret, public }
-    }
-
     pub fn initial_public_message(&self) -> &[u8; 32] {
         self.public.as_bytes()
     }
@@ -29,6 +23,14 @@ impl KeyPair {
         let cipher = Aes256Gcm::new_from_slice(&key).expect("Key is valid");
 
         Encryptor { cipher }
+    }
+}
+
+impl Default for KeyPair {
+    fn default() -> Self {
+        let secret = EphemeralSecret::random_from_rng(OsRng);
+        let public = PublicKey::from(&secret);
+        Self { secret, public }
     }
 }
 
@@ -69,8 +71,8 @@ mod tests {
 
     #[test]
     fn end_to_end() -> Result<()> {
-        let alice = KeyPair::new();
-        let bob = KeyPair::new();
+        let alice = KeyPair::default();
+        let bob = KeyPair::default();
         let alice_pub = alice.public;
         let bob_pub = bob.public;
 
