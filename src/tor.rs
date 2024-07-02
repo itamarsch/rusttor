@@ -3,6 +3,7 @@ use std::net::Ipv4Addr;
 use serde::{Deserialize, Serialize};
 
 pub mod circuit_manager;
+pub mod node;
 mod node_directory;
 pub mod tor_message;
 

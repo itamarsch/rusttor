@@ -1,4 +1,3 @@
-use rustor::network_handler::NetworkHandler;
 use tokio::net::TcpStream;
 
 #[tokio::main]
@@ -8,11 +7,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Connected to server!");
 
     let (reader, writer) = tokio::io::split(stream);
-    let mut network_handler = NetworkHandler::perform_handshake(reader, writer).await?;
+    // let mut network_handler = NetworkHandler::perform_handshake(reader, writer).await?;
 
     let message = "HI".as_bytes();
 
-    network_handler.write_buf_encrypt(message).await?;
+    // network_handler.write_buf_encrypt(message).await?;
 
     Ok(())
 }

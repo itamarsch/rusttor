@@ -11,5 +11,5 @@ pub enum TorMessage {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct MoveAlongMessage {
     pub next: Node,
-    pub not_for_you_data: TorMessage,
+    pub data: TorMessage,
 }
