@@ -4,6 +4,7 @@ use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
+pub type PublicKeyBytes = [u8; 32];
 const NONCE_LENGTH: usize = 12;
 
 pub struct KeyPair {
@@ -12,11 +13,12 @@ pub struct KeyPair {
 }
 
 impl KeyPair {
-    pub fn initial_public_message(&self) -> &[u8; 32] {
-        self.public.as_bytes()
+    pub fn initial_public_message(&self) -> PublicKeyBytes {
+        self.public.as_bytes().to_owned()
     }
-    pub fn handshake(self, other_publickey: &PublicKey) -> Encryptor {
-        let shared = self.secret.diffie_hellman(other_publickey);
+    pub fn handshake(self, other_publickey: PublicKeyBytes) -> Encryptor {
+        let other_publickey = PublicKey::from(other_publickey);
+        let shared = self.secret.diffie_hellman(&other_publickey);
         let shared_secret = shared.as_bytes();
 
         let key = Sha256::digest(shared_secret);
@@ -39,6 +41,14 @@ pub struct Encryptor {
 }
 
 impl Encryptor {
+    pub fn from_public(other_public: PublicKeyBytes) -> (Self, PublicKeyBytes) {
+        let encryptor = KeyPair::default();
+        let public = encryptor.initial_public_message();
+        let encryptor = encryptor.handshake(other_public);
+
+        (encryptor, public)
+    }
+
     pub fn encrypt(&self, bytes: &[u8]) -> Vec<u8> {
         let mut nonce_bytes = [0u8; NONCE_LENGTH];
         OsRng.fill_bytes(&mut nonce_bytes);
@@ -73,11 +83,11 @@ mod tests {
     fn end_to_end() -> Result<()> {
         let alice = KeyPair::default();
         let bob = KeyPair::default();
-        let alice_pub = alice.public;
-        let bob_pub = bob.public;
+        let alice_pub = alice.initial_public_message();
+        let bob_pub = bob.initial_public_message();
 
-        let alice = alice.handshake(&bob_pub);
-        let bob = bob.handshake(&alice_pub);
+        let alice = alice.handshake(bob_pub);
+        let bob = bob.handshake(alice_pub);
 
         let message = "Hello world!";
 
