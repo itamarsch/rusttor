@@ -13,8 +13,7 @@ where
     Forward(F),
 }
 
-pub type ResultMessage = Directional<MoveAlongMessage, TorMessage>;
-pub type RequestMessage = Directional<TorMessage, TorMessage>;
+pub type Message = Directional<MoveAlongMessage, TorMessage>;
 
 #[derive(Default)]
 pub struct CircuitManager {
@@ -22,15 +21,21 @@ pub struct CircuitManager {
 }
 
 impl CircuitManager {
-    pub fn message(&mut self, message: RequestMessage) -> anyhow::Result<ResultMessage> {
+    pub fn message(&mut self, message: Message) -> anyhow::Result<Message> {
         match message {
-            Directional::Forward(TorMessage::HandShake(public_key)) => self.handshake(public_key),
-            Directional::Forward(TorMessage::NotForYou { data }) => self.push_onward(data),
+            Directional::Forward(MoveAlongMessage {
+                data: TorMessage::HandShake(public_key),
+                ..
+            }) => self.handshake(public_key),
+            Directional::Forward(MoveAlongMessage {
+                data: TorMessage::NotForYou { data },
+                ..
+            }) => self.push_onward(data),
             Directional::Back(message) => self.push_response_back(message),
         }
     }
 
-    fn handshake(&mut self, other_public_key: [u8; 32]) -> anyhow::Result<ResultMessage> {
+    fn handshake(&mut self, other_public_key: [u8; 32]) -> anyhow::Result<Message> {
         if self.encryptor.is_some() {
             anyhow::bail!("Received handshake after handshake complete")
         }
@@ -42,7 +47,7 @@ impl CircuitManager {
         Ok(Directional::Back(TorMessage::HandShake(my_public)))
     }
 
-    pub fn push_onward(&mut self, onioned_data: Vec<u8>) -> anyhow::Result<ResultMessage> {
+    pub fn push_onward(&mut self, onioned_data: Vec<u8>) -> anyhow::Result<Message> {
         let Some(ref encryptor) = &self.encryptor else {
             anyhow::bail!("received notforyou before handshake")
         };
@@ -53,7 +58,7 @@ impl CircuitManager {
         Ok(Directional::Forward(next_message))
     }
 
-    fn push_response_back<T>(&mut self, message: T) -> anyhow::Result<ResultMessage>
+    fn push_response_back<T>(&mut self, message: T) -> anyhow::Result<Message>
     where
         T: Serialize,
     {
@@ -98,14 +103,16 @@ mod tests {
         }
     }
 
+    const NODE: Node = Node {
+        ip: Ipv4Addr::new(1, 1, 1, 1),
+        port: 1,
+    };
+
     #[test]
     fn forward_message() -> anyhow::Result<()> {
         let move_along = MoveAlongMessage {
-            next: Node {
-                ip: Ipv4Addr::new(1, 1, 1, 1),
-                port: 1,
-            },
-            not_for_you_data: TorMessage::NotForYou { data: vec![1] },
+            next: NODE,
+            data: TorMessage::NotForYou { data: vec![1] },
         };
 
         let bob = KeyPair::default();
@@ -115,11 +122,14 @@ mod tests {
 
         let bob = bob.handshake(alice_pub);
 
-        let message = TorMessage::NotForYou {
-            data: bob.encrypt(&bincode::serialize(&move_along)?[..]),
+        let message = MoveAlongMessage {
+            data: TorMessage::NotForYou {
+                data: bob.encrypt(&bincode::serialize(&move_along)?[..]),
+            },
+            next: NODE,
         };
 
-        let result = circuit_manager.message(super::Directional::Forward(message))?;
+        let result = circuit_manager.message(Directional::Forward(message))?;
 
         assert_eq!(result, Directional::Forward(move_along));
         Ok(())
@@ -131,7 +141,10 @@ mod tests {
 
         // Send handshake message forward
         let bob = KeyPair::default();
-        let handshake = TorMessage::HandShake(bob.initial_public_message());
+        let handshake = MoveAlongMessage {
+            data: TorMessage::HandShake(bob.initial_public_message()),
+            next: NODE,
+        };
 
         let Directional::Back(TorMessage::HandShake(pubkey)) =
             circuit_manager.message(Directional::Forward(handshake))?
