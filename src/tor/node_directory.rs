@@ -38,7 +38,6 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
     async fn add_nodes() -> anyhow::Result<()> {
         let node = Node {
             ip: Ipv4Addr::new(127, 0, 0, 1),

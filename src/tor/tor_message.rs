@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 
-use super::Node;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum TorMessage {
@@ -9,7 +9,21 @@ pub enum TorMessage {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+pub enum Next {
+    Node(SocketAddr),
+    Server(SocketAddr),
+}
+impl Next {
+    pub fn is_server(&self) -> bool {
+        match self {
+            Next::Node(_) => false,
+            Next::Server(_) => true,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct MoveAlongMessage {
-    pub next: Node,
+    pub next: Next,
     pub data: TorMessage,
 }

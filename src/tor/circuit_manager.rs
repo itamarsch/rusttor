@@ -84,11 +84,10 @@ mod tests {
         encryption::{Encryptor, KeyPair, PublicKeyBytes},
         tor::{
             circuit_manager::Directional,
-            tor_message::{MoveAlongMessage, TorMessage},
-            Node,
+            tor_message::{MoveAlongMessage, Next, TorMessage},
         },
     };
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
     impl CircuitManager {
         fn handshook(other_publickey: PublicKeyBytes) -> (Self, PublicKeyBytes) {
@@ -103,15 +102,15 @@ mod tests {
         }
     }
 
-    const NODE: Node = Node {
-        ip: Ipv4Addr::new(1, 1, 1, 1),
-        port: 1,
-    };
+    const NEXT: Next = Next::Node(SocketAddr::V4(SocketAddrV4::new(
+        Ipv4Addr::new(1, 1, 1, 1),
+        1,
+    )));
 
     #[test]
     fn forward_message() -> anyhow::Result<()> {
         let move_along = MoveAlongMessage {
-            next: NODE,
+            next: NEXT,
             data: TorMessage::NotForYou { data: vec![1] },
         };
 
@@ -126,7 +125,7 @@ mod tests {
             data: TorMessage::NotForYou {
                 data: bob.encrypt(&bincode::serialize(&move_along)?[..]),
             },
-            next: NODE,
+            next: NEXT,
         };
 
         let result = circuit_manager.message(Directional::Forward(message))?;
@@ -143,7 +142,7 @@ mod tests {
         let bob = KeyPair::default();
         let handshake = MoveAlongMessage {
             data: TorMessage::HandShake(bob.initial_public_message()),
-            next: NODE,
+            next: NEXT,
         };
 
         let Directional::Back(TorMessage::HandShake(pubkey)) =

@@ -1,5 +1,5 @@
-use rustor::tor::circuit_manager::CircuitManager;
-use tokio::net::{TcpListener, TcpStream};
+use rustor::tor::node::handle_connection;
+use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

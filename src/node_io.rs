@@ -50,9 +50,9 @@ where
         Ok(())
     }
 
-    pub async fn write(&mut self, value: &W) -> anyhow::Result<()> {
-        let bytes = bincode::serialize(value)?;
-        self.write_length_prefiexed(&bytes[..]);
+    pub async fn write(&mut self, value: W) -> anyhow::Result<()> {
+        let bytes = bincode::serialize(&value)?;
+        self.write_length_prefiexed(&bytes[..]).await?;
         Ok(())
     }
 }
