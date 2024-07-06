@@ -111,15 +111,20 @@ mod tests {
         }
     }
 
-    const NEXT: Next = Next::Node(SocketAddr::V4(SocketAddrV4::new(
+    const NEXT_NODE: Next = Next::Node(SocketAddr::V4(SocketAddrV4::new(
+        Ipv4Addr::new(1, 1, 1, 1),
+        1,
+    )));
+
+    const NEXT_SERVER: Next = Next::Server(SocketAddr::V4(SocketAddrV4::new(
         Ipv4Addr::new(1, 1, 1, 1),
         1,
     )));
 
     #[test]
-    fn forward_message() -> anyhow::Result<()> {
+    fn node_forward_message() -> anyhow::Result<()> {
         let move_along = MoveAlongMessage {
-            next: NEXT,
+            next: NEXT_NODE,
             data: TorMessage::NotForYou { data: vec![1] },
         };
 
@@ -134,7 +139,7 @@ mod tests {
             data: TorMessage::NotForYou {
                 data: bob.encrypt(&bincode::serialize(&move_along)?[..]),
             },
-            next: NEXT,
+            next: NEXT_NODE,
         };
 
         let Directional::Forward(NetworkMessage::TorMessage(result)) =
@@ -148,6 +153,32 @@ mod tests {
     }
 
     #[test]
+    fn server_forward_message() -> anyhow::Result<()> {
+        let data = vec![1];
+        let bob = KeyPair::default();
+
+        let (mut circuit_manager, alice_pub) =
+            CircuitManager::handshook(bob.initial_public_message());
+
+        let bob = bob.handshake(alice_pub);
+
+        let message = MoveAlongMessage {
+            data: TorMessage::NotForYou {
+                data: bob.encrypt(&data[..]),
+            },
+            next: NEXT_SERVER,
+        };
+
+        let Directional::Forward(NetworkMessage::ServerMessage(result)) =
+            circuit_manager.message(Directional::Forward(message))?
+        else {
+            panic!("Unexpected message received")
+        };
+
+        assert_eq!(result, data);
+        Ok(())
+    }
+    #[test]
     fn handshake() -> anyhow::Result<()> {
         let mut circuit_manager = CircuitManager::default();
 
@@ -155,7 +186,7 @@ mod tests {
         let bob = KeyPair::default();
         let handshake = MoveAlongMessage {
             data: TorMessage::HandShake(bob.initial_public_message()),
-            next: NEXT,
+            next: NEXT_NODE,
         };
 
         let Directional::Back(TorMessage::HandShake(pubkey)) =
