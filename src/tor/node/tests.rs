@@ -58,7 +58,7 @@ async fn network_handshake() -> anyhow::Result<()> {
 
     let mut writer: NodeIO<_, TorMessage, MoveAlongMessage> = NodeIO::new(stream);
     writer
-        .write(MoveAlongMessage {
+        .node_write(MoveAlongMessage {
             next: Next::Server(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::new(127, 0, 0, 1),
                 FAKE_SERVER_PORT,
@@ -75,7 +75,7 @@ async fn network_handshake() -> anyhow::Result<()> {
     let message = "Hello";
     let encrypted = encryption.encrypt(message.as_bytes());
     writer
-        .write(MoveAlongMessage {
+        .node_write(MoveAlongMessage {
             next: Next::Server(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::new(127, 0, 0, 1),
                 FAKE_SERVER_PORT,

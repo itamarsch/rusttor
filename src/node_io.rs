@@ -50,9 +50,14 @@ where
         Ok(())
     }
 
-    pub async fn write(&mut self, value: W) -> anyhow::Result<()> {
+    pub async fn node_write(&mut self, value: W) -> anyhow::Result<()> {
         let bytes = bincode::serialize(&value)?;
         self.write_length_prefiexed(&bytes[..]).await?;
+        Ok(())
+    }
+    pub async fn write_raw(&mut self, value: &[u8]) -> anyhow::Result<()> {
+        self.inner.write_all(value).await?;
+        self.inner.flush().await?;
         Ok(())
     }
 }

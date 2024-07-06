@@ -23,6 +23,11 @@ impl Next {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+pub enum NetworkMessage {
+    TorMessage(MoveAlongMessage),
+    ServerMessage(Vec<u8>),
+}
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct MoveAlongMessage {
     pub next: Next,
     pub data: TorMessage,

@@ -7,7 +7,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{node_io::NodeIO, tor::circuit_manager::Directional};
+use crate::{
+    node_io::NodeIO,
+    tor::{circuit_manager::Directional, tor_message::NetworkMessage},
+};
 
 use super::{
     circuit_manager::CircuitManager,
@@ -82,11 +85,15 @@ async fn tor_node(
         match a {
             Directional::Back(m) => {
                 info!("Writing backward: {:?}", m);
-                back_write.write(m).await
+                back_write.node_write(m).await
             }
-            Directional::Forward(m) => {
+            Directional::Forward(NetworkMessage::TorMessage(m)) => {
                 info!("Writing forward: {:?}", m);
-                forward_write.write(m).await
+                forward_write.node_write(m).await
+            }
+            Directional::Forward(NetworkMessage::ServerMessage(data)) => {
+                info!("Writing to server: {:?}", data);
+                forward_write.write_raw(&data).await
             }
         }
     }
@@ -97,7 +104,7 @@ async fn tor_node(
                 info!("Received message from back: {:?}",forward_msg);
                 // Read from the front: direction is backward
                 if let Err(err) = handle_message(&mut circuit_manager, Directional::Back(forward_msg), &mut forward_write, &mut back_write).await {
-                    error!("{}",err);
+                    error!("{:?}",err);
                     break
                 }
             },
@@ -105,7 +112,7 @@ async fn tor_node(
                 info!("Received message from back: {:?}",back_msg);
                 // Read from the back: direction is forward
                 if let Err(err) = handle_message(&mut circuit_manager, Directional::Forward(back_msg), &mut forward_write, &mut back_write).await {
-                    error!("{}",err);
+                    error!("Failed sending message: {:?}",err);
                     break
                 }
             },

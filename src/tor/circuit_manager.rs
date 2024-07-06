@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::tor_message::{MoveAlongMessage, TorMessage};
+use super::tor_message::{MoveAlongMessage, NetworkMessage, Next, TorMessage};
 use crate::encryption::Encryptor;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -13,7 +13,8 @@ where
     Forward(F),
 }
 
-pub type Message = Directional<MoveAlongMessage, TorMessage>;
+pub type IncomingMessage = Directional<MoveAlongMessage, TorMessage>;
+pub type OutgoingMessage = Directional<NetworkMessage, TorMessage>;
 
 #[derive(Default)]
 pub struct CircuitManager {
@@ -21,7 +22,7 @@ pub struct CircuitManager {
 }
 
 impl CircuitManager {
-    pub fn message(&mut self, message: Message) -> anyhow::Result<Message> {
+    pub fn message(&mut self, message: IncomingMessage) -> anyhow::Result<OutgoingMessage> {
         match message {
             Directional::Forward(MoveAlongMessage {
                 data: TorMessage::HandShake(public_key),
@@ -29,13 +30,13 @@ impl CircuitManager {
             }) => self.handshake(public_key),
             Directional::Forward(MoveAlongMessage {
                 data: TorMessage::NotForYou { data },
-                ..
-            }) => self.push_onward(data),
+                next,
+            }) => self.push_onward(data, next),
             Directional::Back(message) => self.push_response_back(message),
         }
     }
 
-    fn handshake(&mut self, other_public_key: [u8; 32]) -> anyhow::Result<Message> {
+    fn handshake(&mut self, other_public_key: [u8; 32]) -> anyhow::Result<OutgoingMessage> {
         if self.encryptor.is_some() {
             anyhow::bail!("Received handshake after handshake complete")
         }
@@ -47,18 +48,26 @@ impl CircuitManager {
         Ok(Directional::Back(TorMessage::HandShake(my_public)))
     }
 
-    pub fn push_onward(&mut self, onioned_data: Vec<u8>) -> anyhow::Result<Message> {
+    pub fn push_onward(
+        &mut self,
+        onioned_data: Vec<u8>,
+        next: Next,
+    ) -> anyhow::Result<OutgoingMessage> {
         let Some(ref encryptor) = &self.encryptor else {
             anyhow::bail!("received notforyou before handshake")
         };
 
         let deonionized = encryptor.decrypt(&onioned_data[..])?;
-        let next_message: MoveAlongMessage = bincode::deserialize(&deonionized[..])?;
+        let next_message = if next.is_server() {
+            NetworkMessage::ServerMessage(deonionized)
+        } else {
+            NetworkMessage::TorMessage(bincode::deserialize(&deonionized[..])?)
+        };
 
         Ok(Directional::Forward(next_message))
     }
 
-    fn push_response_back<T>(&mut self, message: T) -> anyhow::Result<Message>
+    fn push_response_back<T>(&mut self, message: T) -> anyhow::Result<OutgoingMessage>
     where
         T: Serialize,
     {
@@ -84,7 +93,7 @@ mod tests {
         encryption::{Encryptor, KeyPair, PublicKeyBytes},
         tor::{
             circuit_manager::Directional,
-            tor_message::{MoveAlongMessage, Next, TorMessage},
+            tor_message::{MoveAlongMessage, NetworkMessage, Next, TorMessage},
         },
     };
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -128,9 +137,13 @@ mod tests {
             next: NEXT,
         };
 
-        let result = circuit_manager.message(Directional::Forward(message))?;
+        let Directional::Forward(NetworkMessage::TorMessage(result)) =
+            circuit_manager.message(Directional::Forward(message))?
+        else {
+            panic!("Unexpected message received")
+        };
 
-        assert_eq!(result, Directional::Forward(move_along));
+        assert_eq!(result, move_along);
         Ok(())
     }
 
