@@ -23,7 +23,7 @@ where
     R: DeserializeOwned,
 {
     async fn read_length_prefixed(&mut self) -> io::Result<Vec<u8>> {
-        let len = self.inner.read_u32().await? as usize;
+        let len = self.inner.read_u32_le().await? as usize;
 
         let mut buf = vec![0u8; len];
         self.inner.read_exact(&mut buf).await?;

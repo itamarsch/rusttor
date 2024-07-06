@@ -1,3 +1,4 @@
+use log::{error, info};
 use serde::de::DeserializeOwned;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -23,13 +24,20 @@ pub async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
     let (back_sender, back_receiver) = mpsc::channel(10);
 
     let message = back_node_reader.read().await?;
+    let next = message.next.clone();
+
+    back_sender
+        .send(message)
+        .await
+        .expect("Channel isn't closed");
+
     tokio::spawn(reader_task(
         back_node_reader,
         cancellation_token.clone(),
         back_sender,
     ));
 
-    let (forward_read, forward_write) = tokio::io::split(match message.next {
+    let (forward_read, forward_write) = tokio::io::split(match next {
         Next::Node(n) => TcpStream::connect(n).await?,
         Next::Server(n) => TcpStream::connect(n).await?,
     });
@@ -64,31 +72,42 @@ async fn tor_node(
 ) {
     let mut circuit_manager = CircuitManager::default();
 
+    async fn handle_message(
+        circuit_manager: &mut CircuitManager,
+        message: Directional<MoveAlongMessage, TorMessage>,
+        forward_write: &mut NodeIO<impl AsyncWrite + Unpin, (), MoveAlongMessage>,
+        back_write: &mut NodeIO<impl AsyncWrite + Unpin, (), TorMessage>,
+    ) -> anyhow::Result<()> {
+        let a = circuit_manager.message(message)?;
+        match a {
+            Directional::Back(m) => {
+                info!("Writing backward: {:?}", m);
+                back_write.write(m).await
+            }
+            Directional::Forward(m) => {
+                info!("Writing forward: {:?}", m);
+                forward_write.write(m).await
+            }
+        }
+    }
+
     loop {
         tokio::select! {
             Some(forward_msg) = front_receiver.recv() => {
+                info!("Received message from back: {:?}",forward_msg);
                 // Read from the front: direction is backward
-                let Ok(a) = circuit_manager.message(Directional::Back(forward_msg)) else {
-                    break;
-                };
-                let Ok(()) = (match a {
-                    Directional::Back(m) => back_write.write(m).await,
-                    Directional::Forward(m) => forward_write.write(m).await,
-                }) else {
-                    break;
-                };
+                if let Err(err) = handle_message(&mut circuit_manager, Directional::Back(forward_msg), &mut forward_write, &mut back_write).await {
+                    error!("{}",err);
+                    break
+                }
             },
             Some(back_msg) = back_receiver.recv() => {
+                info!("Received message from back: {:?}",back_msg);
                 // Read from the back: direction is forward
-                let Ok(a) = circuit_manager.message(Directional::Forward(back_msg)) else {
-                    break;
-                };
-                let Ok(()) = (match a {
-                    Directional::Back(m) => back_write.write(m).await,
-                    Directional::Forward(m) => forward_write.write(m).await,
-                }) else {
-                    break;
-                };
+                if let Err(err) = handle_message(&mut circuit_manager, Directional::Forward(back_msg), &mut forward_write, &mut back_write).await {
+                    error!("{}",err);
+                    break
+                }
             },
             else => {
                 break;
@@ -132,4 +151,5 @@ async fn reader_task<V, G>(
     println!("reader_task has been gracefully shut down.");
 }
 
+mod tests;
 // Example

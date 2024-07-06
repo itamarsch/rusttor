@@ -8,7 +8,7 @@ pub enum TorMessage {
     HandShake([u8; 32]),
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Next {
     Node(SocketAddr),
     Server(SocketAddr),
