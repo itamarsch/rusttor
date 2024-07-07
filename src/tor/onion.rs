@@ -65,7 +65,19 @@ pub fn onion_wrap_handshake(
     onion_wrap_tor_message(&nodes[..], |_, _| TorMessage::HandShake(pubkey))
 }
 
-pub fn decrypt_onion_layers() {}
+pub fn decrypt_onion_layers(
+    encryptors: &[&Encryptor],
+    data: TorMessage,
+) -> anyhow::Result<TorMessage> {
+    encryptors.iter().try_fold(data, |current_data, encryptor| {
+        let TorMessage::NotForYou { data: encrypted } = current_data else {
+            anyhow::bail!("Invalid packet, didn't receive notforyou");
+        };
+        let decrypted = encryptor.decrypt(&encrypted)?;
+        let deserialized = bincode::deserialize(&decrypted[..])?;
+        Ok(deserialized)
+    })
+}
 
 #[cfg(test)]
 mod tests {
