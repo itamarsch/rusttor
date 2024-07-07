@@ -1,5 +1,5 @@
 use std::{iter, net::SocketAddr};
-
+use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 
 use crate::{
@@ -12,72 +12,94 @@ use super::{
     onion::onion_wrap_packet,
     tor_message::{MoveAlongMessage, Next, TorMessage},
 };
-
-type NetworkNodeIO = NodeIO<TcpStream, TorMessage, MoveAlongMessage>;
-
-pub struct TorClient {
+type NetworkIO<T> = NodeIO<T, TorMessage, MoveAlongMessage>;
+pub struct TorClient<T> {
     nodes: Vec<(Encryptor, Next)>,
 
-    stream: NetworkNodeIO,
+    stream: NetworkIO<T>,
 }
 
-impl TorClient {
-    pub async fn nodes_handshake(
-        mut nodes: Vec<SocketAddr>,
-        server: SocketAddr,
-    ) -> anyhow::Result<TorClient> {
-        assert!(!nodes.is_empty(), "Can't run a request on zero nodes");
-        let stream = TcpStream::connect(nodes[0]).await?;
+pub async fn nodes_handshake(
+    mut nodes: Vec<SocketAddr>,
+    server: SocketAddr,
+) -> anyhow::Result<(
+    TorClient<ReadHalf<TcpStream>>,
+    TorClient<WriteHalf<TcpStream>>,
+)> {
+    assert!(!nodes.is_empty(), "Can't run a request on zero nodes");
+    let stream = TcpStream::connect(nodes[0]).await?;
+    let (reader, writer) = tokio::io::split(stream);
 
-        let mut stream = NetworkNodeIO::new(stream);
-        nodes.remove(0);
-        let mut nodes = iter::repeat(None)
-            .zip(nodes.into_iter().map(Next::Node))
-            .collect::<Vec<_>>();
-        nodes.push((None, Next::Server(server)));
+    let mut reader: NetworkIO<_> = NodeIO::new(reader);
+    let mut writer: NetworkIO<_> = NodeIO::new(writer);
 
-        for i in 0..nodes.len() {
-            let my_pubkey = KeyPair::default();
+    nodes.remove(0);
+    let mut nodes = iter::repeat(None)
+        .zip(nodes.into_iter().map(Next::Node))
+        .collect::<Vec<_>>();
+    nodes.push((None, Next::Server(server)));
 
-            stream
-                .node_write(
-                    onion_wrap_handshake(&nodes[..], my_pubkey.initial_public_message()).unwrap(),
-                )
-                .await?;
+    for i in 0..nodes.len() {
+        let my_pubkey = KeyPair::default();
 
-            let encrypted_nodes = nodes
-                .iter()
-                .map(|(encryptor, _)| encryptor.as_ref())
-                .take_while(|a| a.is_some())
-                .map(|a| a.unwrap())
-                .collect::<Vec<_>>();
+        writer
+            .node_write(
+                onion_wrap_handshake(&nodes[..], my_pubkey.initial_public_message()).unwrap(),
+            )
+            .await?;
 
-            let TorMessage::HandShake(other_pubkey) =
-                decrypt_onion_layers(&encrypted_nodes[..], stream.read().await?)?
-            else {
-                anyhow::bail!("Expected handshake");
-            };
-
-            let (encryptor, _) = &mut nodes[i];
-
-            *encryptor = Some(my_pubkey.handshake(other_pubkey));
-        }
-
-        let nodes = nodes
-            .into_iter()
-            .map(|(encryptor, next)| (encryptor.unwrap(), next))
+        let encrypted_nodes = nodes
+            .iter()
+            .map(|(encryptor, _)| encryptor.as_ref())
+            .take_while(|a| a.is_some())
+            .map(|a| a.unwrap())
             .collect::<Vec<_>>();
 
-        Ok(TorClient { nodes, stream })
+        let TorMessage::HandShake(other_pubkey) =
+            decrypt_onion_layers(&encrypted_nodes[..], reader.read().await?)?
+        else {
+            anyhow::bail!("Expected handshake");
+        };
+
+        let (encryptor, _) = &mut nodes[i];
+
+        *encryptor = Some(my_pubkey.handshake(other_pubkey));
     }
 
+    let reader_nodes = nodes
+        .into_iter()
+        .map(|(encryptor, next)| (encryptor.unwrap(), next))
+        .collect::<Vec<_>>();
+
+    let writer_nodes = reader_nodes.clone();
+
+    Ok((
+        TorClient {
+            nodes: reader_nodes,
+            stream: reader,
+        },
+        TorClient {
+            nodes: writer_nodes,
+            stream: writer,
+        },
+    ))
+}
+impl<T> TorClient<T>
+where
+    T: AsyncWrite + Unpin,
+{
     pub async fn write(&mut self, data: Vec<u8>) -> anyhow::Result<()> {
         self.stream
             .node_write(onion_wrap_packet(&self.nodes[..], data).expect("Isn't empty"))
             .await?;
         Ok(())
     }
+}
 
+impl<T> TorClient<T>
+where
+    T: AsyncRead + Unpin,
+{
     pub async fn read(&mut self) -> anyhow::Result<Vec<u8>> {
         let message = self.stream.read().await?;
 

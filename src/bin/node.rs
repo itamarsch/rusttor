@@ -13,7 +13,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    env_logger::builder().format_timestamp(None).init();
     let args = Args::parse();
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port)).await?;

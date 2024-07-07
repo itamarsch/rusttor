@@ -14,7 +14,7 @@ use crate::{
     encryption::KeyPair,
     node_io::NodeIO,
     tor::{
-        client::TorClient,
+        client::{nodes_handshake, TorClient},
         onion::{decrypt_onion_layers, onion_wrap_handshake, onion_wrap_packet},
         tor_message::{MoveAlongMessage, Next, TorMessage},
     },
@@ -68,15 +68,15 @@ async fn start_fake_server(port: u16) -> anyhow::Result<Child> {
 async fn end_to_end() -> anyhow::Result<()> {
     info!("Connected to node!");
 
-    let mut client =
-        TorClient::nodes_handshake(vec![NODE1, NODE2, NODE3, NODE4], FAKE_SERVER).await?;
+    let (mut reader, mut writer) =
+        nodes_handshake(vec![NODE1, NODE2, NODE3, NODE4], FAKE_SERVER).await?;
 
     info!("Finised handshake with node2!");
 
     let message = "Hello";
-    client.write(message.as_bytes().to_vec()).await?;
+    writer.write(message.as_bytes().to_vec()).await?;
 
-    let message = client.read().await?;
+    let message = reader.read().await?;
     let message = String::from_utf8(message)?;
     info!("Reponse is: {}", message);
 

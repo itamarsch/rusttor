@@ -92,16 +92,20 @@ async fn tor_node(
     ) -> anyhow::Result<()> {
         let a = circuit_manager.message(message)?;
         match a {
-            Directional::Back(m) => {
-                info!("Writing backward: {:?}", m);
+            Directional::Back(m @ TorMessage::NotForYou { .. }) => {
+                info!("Writing backward: TorMessage");
+                back_write.node_write(m).await
+            }
+            Directional::Back(m @ TorMessage::HandShake { .. }) => {
+                info!("Writing backward: Handshake");
                 back_write.node_write(m).await
             }
             Directional::Forward(NetworkMessage::TorMessage(m)) => {
-                info!("Writing forward: {:?}", m);
+                info!("Writing forward: TorMessage");
                 forward_write.node_write(m).await
             }
             Directional::Forward(NetworkMessage::ServerMessage(data)) => {
-                info!("Writing to server: {:?}", data);
+                info!("Writing to server: ");
                 forward_write.write_raw(&data).await
             }
         }
@@ -110,7 +114,7 @@ async fn tor_node(
     loop {
         tokio::select! {
             Some(forward_msg) = front_receiver.recv() => {
-                info!("Received message from front: {:?}",forward_msg);
+                info!("Received message from front");
                 // Read from the front: direction is backward
                 if let Err(err) = handle_message(&mut circuit_manager, Directional::Back(forward_msg), &mut forward_write, &mut back_write).await {
                     error!("{:?}",err);
@@ -118,7 +122,7 @@ async fn tor_node(
                 }
             },
             Some(back_msg) = back_receiver.recv() => {
-                info!("Received message from back: {:?}", back_msg);
+                info!("Received message from back");
                 // Read from the back: direction is forward
                 if let Err(err) = handle_message(&mut circuit_manager, Directional::Forward(back_msg), &mut forward_write, &mut back_write).await {
                     error!("Failed sending message: {:?}",err);
