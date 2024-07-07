@@ -27,7 +27,7 @@ pub async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
     let (back_sender, back_receiver) = mpsc::channel(10);
 
     let message = back_node_reader.read().await?;
-    let next = message.next.clone();
+    let next = message.next;
 
     back_sender
         .send(message)
@@ -110,7 +110,7 @@ async fn tor_node(
     loop {
         tokio::select! {
             Some(forward_msg) = front_receiver.recv() => {
-                info!("Received message from back: {:?}",forward_msg);
+                info!("Received message from front: {:?}",forward_msg);
                 // Read from the front: direction is backward
                 if let Err(err) = handle_message(&mut circuit_manager, Directional::Back(forward_msg), &mut forward_write, &mut back_write).await {
                     error!("{:?}",err);
@@ -118,7 +118,7 @@ async fn tor_node(
                 }
             },
             Some(back_msg) = back_receiver.recv() => {
-                info!("Received message from back: {:?}",back_msg);
+                info!("Received message from back: {:?}", back_msg);
                 // Read from the back: direction is forward
                 if let Err(err) = handle_message(&mut circuit_manager, Directional::Forward(back_msg), &mut forward_write, &mut back_write).await {
                     error!("Failed sending message: {:?}",err);

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub mod circuit_manager;
 pub mod node;
 mod node_directory;
+pub mod packet_builder;
 pub mod tor_message;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
