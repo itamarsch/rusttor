@@ -2,7 +2,7 @@ use crate::encryption::{Encryptor, PublicKeyBytes};
 
 use super::tor_message::{MoveAlongMessage, Next, TorMessage};
 
-pub fn build_packet_tor_message(
+pub fn onion_wrap_tor_message(
     nodes: &[(Option<&Encryptor>, Next)],
     tor_message_build: impl Fn(Option<&Encryptor>, Next) -> TorMessage,
 ) -> Option<MoveAlongMessage> {
@@ -29,20 +29,20 @@ pub fn build_packet_tor_message(
             }
         })
 }
-pub fn build_packet(nodes: &[(&Encryptor, Next)], data: Vec<u8>) -> Option<MoveAlongMessage> {
+pub fn onion_wrap_packet(nodes: &[(&Encryptor, Next)], data: Vec<u8>) -> Option<MoveAlongMessage> {
     let nodes = nodes
         .iter()
         .map(|(encryptor, next)| (Some(*encryptor), *next))
         .collect::<Vec<_>>();
 
-    build_packet_tor_message(&nodes[..], |encryptor, next| {
+    onion_wrap_tor_message(&nodes[..], |encryptor, next| {
         assert!(next.is_server());
         let data = encryptor.unwrap().encrypt(&data[..]);
         TorMessage::NotForYou { data }
     })
 }
 
-pub fn build_handshake(
+pub fn onion_wrap_handshake(
     nodes: &[(Option<&Encryptor>, Next)],
 
     pubkey: PublicKeyBytes,
@@ -62,8 +62,10 @@ pub fn build_handshake(
         .map(|(encryptor, next)| (*encryptor, *next))
         .collect::<Vec<_>>();
 
-    build_packet_tor_message(&nodes[..], |_, _| TorMessage::HandShake(pubkey))
+    onion_wrap_tor_message(&nodes[..], |_, _| TorMessage::HandShake(pubkey))
 }
+
+pub fn decrypt_onion_layers() {}
 
 #[cfg(test)]
 mod tests {
@@ -98,7 +100,7 @@ mod tests {
         let nodes = &[(&alice_encryptor, BOB_NODE), (&bob_encryptor, (SERVER))];
         let data = b"test data".to_vec();
 
-        let result = build_packet(nodes, data.clone());
+        let result = onion_wrap_packet(nodes, data.clone());
         assert!(result.is_some());
 
         let message: MoveAlongMessage = result.unwrap();
@@ -132,7 +134,7 @@ mod tests {
 
         let bob = KeyPair::default();
 
-        let result = build_handshake(nodes, bob.initial_public_message());
+        let result = onion_wrap_handshake(nodes, bob.initial_public_message());
 
         let message: MoveAlongMessage = result.unwrap();
         assert_eq!(message.next, BOB_NODE);
@@ -156,7 +158,7 @@ mod tests {
         let nodes = &[(None, BOB_NODE), (None, SERVER)];
         let bob = KeyPair::default();
 
-        let message = build_handshake(nodes, bob.initial_public_message()).unwrap();
+        let message = onion_wrap_handshake(nodes, bob.initial_public_message()).unwrap();
 
         let TorMessage::HandShake(pubkey) = message.data else {
             panic!("Handshake?");

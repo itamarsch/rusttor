@@ -14,7 +14,7 @@ use crate::{
     encryption::KeyPair,
     node_io::NodeIO,
     tor::{
-        packet_builder::{build_handshake, build_packet},
+        onion::{onion_wrap_handshake, onion_wrap_packet},
         tor_message::{MoveAlongMessage, Next, TorMessage},
     },
 };
@@ -68,7 +68,7 @@ async fn network_handshake() -> anyhow::Result<()> {
     let mut writer: NodeIO<_, TorMessage, MoveAlongMessage> = NodeIO::new(stream);
     writer
         .node_write(
-            build_handshake(
+            onion_wrap_handshake(
                 &[(None, fake_server)],
                 encryption_1.initial_public_message(),
             )
@@ -85,7 +85,7 @@ async fn network_handshake() -> anyhow::Result<()> {
     let message = "Hello";
     writer
         .node_write(
-            build_packet(&[(&encryption_1, fake_server)], message.as_bytes().to_vec())
+            onion_wrap_packet(&[(&encryption_1, fake_server)], message.as_bytes().to_vec())
                 .expect("Isn't empty"),
         )
         .await?;
