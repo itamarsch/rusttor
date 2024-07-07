@@ -19,7 +19,8 @@ pub fn onion_wrap_tor_message(
             }
             Some(curr_message) => {
                 let curr_message_bytes = bincode::serialize(&curr_message).unwrap();
-                let curr_message_encrypted = encryptor.unwrap().encrypt(&curr_message_bytes);
+                let curr_message_encrypted =
+                    encryptor.as_ref().unwrap().encrypt(&curr_message_bytes);
                 Some(MoveAlongMessage {
                     next: *next,
                     data: TorMessage::NotForYou {
@@ -29,10 +30,10 @@ pub fn onion_wrap_tor_message(
             }
         })
 }
-pub fn onion_wrap_packet(nodes: &[(&Encryptor, Next)], data: Vec<u8>) -> Option<MoveAlongMessage> {
+pub fn onion_wrap_packet(nodes: &[(Encryptor, Next)], data: Vec<u8>) -> Option<MoveAlongMessage> {
     let nodes = nodes
         .iter()
-        .map(|(encryptor, next)| (Some(*encryptor), *next))
+        .map(|(encryptor, next)| (Some(encryptor), *next))
         .collect::<Vec<_>>();
 
     onion_wrap_tor_message(&nodes[..], |encryptor, next| {
@@ -43,7 +44,7 @@ pub fn onion_wrap_packet(nodes: &[(&Encryptor, Next)], data: Vec<u8>) -> Option<
 }
 
 pub fn onion_wrap_handshake(
-    nodes: &[(Option<&Encryptor>, Next)],
+    nodes: &[(Option<Encryptor>, Next)],
 
     pubkey: PublicKeyBytes,
 ) -> Option<MoveAlongMessage> {
@@ -59,7 +60,7 @@ pub fn onion_wrap_handshake(
                 Some(x)
             }
         })
-        .map(|(encryptor, next)| (*encryptor, *next))
+        .map(|(encryptor, next)| (encryptor.as_ref(), *next))
         .collect::<Vec<_>>();
 
     onion_wrap_tor_message(&nodes[..], |_, _| TorMessage::HandShake(pubkey))
@@ -109,7 +110,10 @@ mod tests {
         let alice_encryptor = client_alice.handshake(alice.initial_public_message());
 
         // Nodes and data for packet construction
-        let nodes = &[(&alice_encryptor, BOB_NODE), (&bob_encryptor, (SERVER))];
+        let nodes = &[
+            (alice_encryptor.clone(), BOB_NODE),
+            (bob_encryptor.clone(), (SERVER)),
+        ];
         let data = b"test data".to_vec();
 
         let result = onion_wrap_packet(nodes, data.clone());
@@ -142,7 +146,7 @@ mod tests {
         let alice_encryptor = client_alice.handshake(alice.initial_public_message());
 
         // Nodes for handshake construction
-        let nodes = &[(Some(&alice_encryptor), BOB_NODE), (None, SERVER)];
+        let nodes = &[(Some(alice_encryptor.clone()), BOB_NODE), (None, SERVER)];
 
         let bob = KeyPair::default();
 

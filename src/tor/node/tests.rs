@@ -14,10 +14,34 @@ use crate::{
     encryption::KeyPair,
     node_io::NodeIO,
     tor::{
-        onion::{onion_wrap_handshake, onion_wrap_packet},
+        client::TorClient,
+        onion::{decrypt_onion_layers, onion_wrap_handshake, onion_wrap_packet},
         tor_message::{MoveAlongMessage, Next, TorMessage},
     },
 };
+
+const NODE1_PORT: u16 = 10000;
+const NODE2_PORT: u16 = 10001;
+const NODE3_PORT: u16 = 10002;
+const NODE4_PORT: u16 = 10003;
+
+const FAKE_SERVER_PORT: u16 = 12345;
+const NODE1: SocketAddr =
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), NODE1_PORT));
+
+const NODE2: SocketAddr =
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), NODE2_PORT));
+
+const NODE3: SocketAddr =
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), NODE3_PORT));
+
+const NODE4: SocketAddr =
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), NODE4_PORT));
+
+const FAKE_SERVER: SocketAddr = SocketAddr::V4(SocketAddrV4::new(
+    Ipv4Addr::new(127, 0, 0, 1),
+    FAKE_SERVER_PORT,
+));
 
 async fn start_node(port: u16) -> anyhow::Result<Child> {
     let proc = Command::new("cargo")
@@ -41,65 +65,39 @@ async fn start_fake_server(port: u16) -> anyhow::Result<Child> {
     Ok(server)
 }
 
-#[tokio::test]
-async fn network_handshake() -> anyhow::Result<()> {
-    env_logger::init();
-
-    const NODE1_PORT: u16 = 10000;
-    const NODE2_PORT: u16 = 10001;
-
-    const FAKE_SERVER_PORT: u16 = 12345;
-    let fake_server = Next::Server(SocketAddr::V4(SocketAddrV4::new(
-        Ipv4Addr::new(127, 0, 0, 1),
-        FAKE_SERVER_PORT,
-    )));
-
-    let mut node_1_proc = start_node(NODE1_PORT).await?;
-    let mut server = start_fake_server(FAKE_SERVER_PORT).await?;
-
-    sleep(Duration::from_secs_f32(1.5)).await;
-
-    let encryption_1 = KeyPair::default();
-
-    let stream = tokio::net::TcpStream::connect(format!("localhost:{}", NODE1_PORT)).await?;
+async fn end_to_end() -> anyhow::Result<()> {
     info!("Connected to node!");
-    tokio::time::sleep(tokio::time::Duration::from_secs_f32(3.0)).await;
 
-    let mut writer: NodeIO<_, TorMessage, MoveAlongMessage> = NodeIO::new(stream);
-    writer
-        .node_write(
-            onion_wrap_handshake(
-                &[(None, fake_server)],
-                encryption_1.initial_public_message(),
-            )
-            .unwrap(),
-        )
-        .await?;
-    info!("Wrote message to node!");
+    let mut client =
+        TorClient::nodes_handshake(vec![NODE1, NODE2, NODE3, NODE4], FAKE_SERVER).await?;
 
-    let TorMessage::HandShake(pubkey) = writer.read().await? else {
-        panic!("Didn't receive handshake back");
-    };
-    let encryption_1 = encryption_1.handshake(pubkey);
+    info!("Finised handshake with node2!");
 
     let message = "Hello";
-    writer
-        .node_write(
-            onion_wrap_packet(&[(&encryption_1, fake_server)], message.as_bytes().to_vec())
-                .expect("Isn't empty"),
-        )
-        .await?;
+    client.write(message.as_bytes().to_vec()).await?;
 
-    let TorMessage::NotForYou { data: response } = writer.read().await? else {
-        panic!("Unexpected handshake");
-    };
-    let message = encryption_1.decrypt(&response)?;
+    let message = client.read().await?;
     let message = String::from_utf8(message)?;
     info!("Reponse is: {}", message);
 
-    sleep(Duration::from_secs_f32(3.0)).await;
-
-    node_1_proc.kill().await?;
-    server.kill().await?;
     Ok(())
+}
+
+#[tokio::test]
+async fn test_end_to_end() -> anyhow::Result<()> {
+    env_logger::init();
+
+    let mut node_1_proc = start_node(NODE1_PORT).await?;
+    let mut node_2_proc = start_node(NODE2_PORT).await?;
+    let mut node_3_proc = start_node(NODE3_PORT).await?;
+    let mut node_4_proc = start_node(NODE4_PORT).await?;
+    let mut server = start_fake_server(FAKE_SERVER_PORT).await?;
+    sleep(Duration::from_secs_f32(1.5)).await;
+    let result = end_to_end().await;
+    node_1_proc.kill().await?;
+    node_2_proc.kill().await?;
+    node_3_proc.kill().await?;
+    node_4_proc.kill().await?;
+    server.kill().await?;
+    result
 }

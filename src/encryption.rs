@@ -36,6 +36,7 @@ impl Default for KeyPair {
     }
 }
 
+#[derive(Clone)]
 pub struct Encryptor {
     cipher: Aes256Gcm,
 }
