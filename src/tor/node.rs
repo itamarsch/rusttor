@@ -1,7 +1,7 @@
 use log::{error, info};
 use serde::de::DeserializeOwned;
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite},
     net::TcpStream,
     sync::mpsc,
 };
@@ -40,21 +40,29 @@ pub async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
         back_sender,
     ));
 
-    let (forward_read, forward_write) = tokio::io::split(match next {
+    let (front_read, forward_write) = tokio::io::split(match next {
         Next::Node(n) => TcpStream::connect(n).await?,
         Next::Server(n) => TcpStream::connect(n).await?,
     });
 
-    let front_read: NodeIO<_, TorMessage, ()> = NodeIO::new(forward_read);
     let front_write: NodeIO<_, (), MoveAlongMessage> = NodeIO::new(forward_write);
 
     let (front_sender, front_receiver) = mpsc::channel(10);
-    tokio::spawn(reader_task(
-        front_read,
-        cancellation_token.clone(),
-        front_sender,
-    ));
 
+    if next.is_server() {
+        tokio::spawn(server_reader_task(
+            front_read,
+            cancellation_token.clone(),
+            front_sender,
+        ));
+    } else {
+        let front_read: NodeIO<_, TorMessage, ()> = NodeIO::new(front_read);
+        tokio::spawn(reader_task(
+            front_read,
+            cancellation_token.clone(),
+            front_sender,
+        ));
+    }
     tor_node(
         cancellation_token,
         front_write,
@@ -63,6 +71,7 @@ pub async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
         back_receiver,
     )
     .await;
+
     Ok(())
 }
 
@@ -124,6 +133,39 @@ async fn tor_node(
     cancellation.cancel();
 }
 
+async fn server_reader_task(
+    mut reader: impl AsyncRead + Unpin,
+    cancellation: CancellationToken,
+    new_data_sender: mpsc::Sender<TorMessage>,
+) {
+    let mut buf = vec![0; 1024];
+    loop {
+        tokio::select! {
+            _ = cancellation.cancelled() => {
+                info!("Cancellation requested, shutting down server_reader_task.");
+                break;
+            }
+            Ok(len) = reader.read(&mut buf) => {
+                if len == 0 {
+                    break;
+                }
+
+                let message = buf[0..len].to_vec();
+                let message = TorMessage::NotForYou { data: message };
+                if new_data_sender.send(message).await.is_err() {
+                    error!("Failed sending to channel");
+                    break;
+                }
+            }
+            else => {
+                info!("Failed reading from server closing");
+                cancellation.cancel();
+                break;
+            }
+        };
+    }
+}
+
 async fn reader_task<V, G>(
     mut reader: NodeIO<impl AsyncRead + Unpin, V, G>,
     cancellation: CancellationToken,
@@ -134,7 +176,7 @@ async fn reader_task<V, G>(
     loop {
         tokio::select! {
             _ = cancellation.cancelled() => {
-                println!("Cancellation requested, shutting down reader_task.");
+                info!("Cancellation requested, shutting down reader_task.");
                 break;
             },
             result = reader.read() => {
@@ -154,8 +196,6 @@ async fn reader_task<V, G>(
             },
         }
     }
-
-    println!("reader_task has been gracefully shut down.");
 }
 
 mod tests;

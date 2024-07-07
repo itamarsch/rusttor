@@ -84,6 +84,13 @@ async fn network_handshake() -> anyhow::Result<()> {
         })
         .await?;
 
+    let TorMessage::NotForYou { data: response } = writer.read().await? else {
+        panic!("Unexpected handshake");
+    };
+    let message = encryption.decrypt(&response)?;
+    let message = String::from_utf8(message)?;
+    info!("Reponse is: {}", message);
+
     sleep(Duration::from_secs_f32(3.0)).await;
 
     node.kill().await?;

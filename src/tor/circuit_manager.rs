@@ -14,7 +14,7 @@ where
 }
 
 pub type IncomingMessage = Directional<MoveAlongMessage, TorMessage>;
-pub type OutgoingMessage = Directional<NetworkMessage, TorMessage>;
+pub type OutgoingMessage = Directional<NetworkMessage<MoveAlongMessage>, TorMessage>;
 
 #[derive(Default)]
 pub struct CircuitManager {

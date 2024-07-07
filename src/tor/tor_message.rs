@@ -23,8 +23,8 @@ impl Next {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub enum NetworkMessage {
-    TorMessage(MoveAlongMessage),
+pub enum NetworkMessage<T> {
+    TorMessage(T),
     ServerMessage(Vec<u8>),
 }
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
