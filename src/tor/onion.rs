@@ -37,6 +37,20 @@ pub fn onion_wrap_packet(nodes: &[(Encryptor, Next)], data: Vec<u8>) -> Option<T
     })
 }
 
+pub fn onion_wrap_connect_to(nodes: &[(Option<Encryptor>, Next)]) -> Option<TorMessage> {
+    let nodes = nodes
+        .iter()
+        .take_while(|(encryptor, _)| encryptor.is_some())
+        .map(|(encryptor, next)| (encryptor.as_ref(), *next))
+        .collect::<Vec<_>>();
+
+    onion_wrap_tor_message(&nodes[..], |encryptor, next| TorMessage::NextNode {
+        next_encrypted: encryptor
+            .unwrap()
+            .encrypt(&bincode::serialize(&next).unwrap()[..]),
+    })
+}
+
 pub fn onion_wrap_handshake(
     nodes: &[(Option<Encryptor>, Next)],
 

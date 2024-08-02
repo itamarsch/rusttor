@@ -1,7 +1,7 @@
 use log::{error, info};
 use serde::de::DeserializeOwned;
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, WriteHalf},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite},
     net::TcpStream,
     sync::mpsc,
 };
@@ -23,7 +23,7 @@ pub async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
     let (back_read, back_write) = tokio::io::split(stream);
     let back_write: NodeIO<_, (), TorMessage> = NodeIO::new(back_write);
 
-    let mut back_node_reader: NodeIO<_, TorMessage, ()> = NodeIO::new(back_read);
+    let back_node_reader: NodeIO<_, TorMessage, ()> = NodeIO::new(back_read);
     let (back_sender, back_receiver) = mpsc::channel(10);
 
     tokio::spawn(reader_task(
@@ -32,7 +32,7 @@ pub async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
         back_sender,
     ));
 
-    tor_node(cancellation_token, back_write, back_receiver).await;
+    tor_node(cancellation_token, back_write, back_receiver).await?;
 
     Ok(())
 }
@@ -96,10 +96,11 @@ async fn tor_node(
                 info!("Writing backward: Handshake");
                 back_write.node_write(m).await
             }
-            Directional::Back(m @ TorMessage::NextNode { .. }) => {
+            Directional::Back(TorMessage::NextNode { .. }) => {
                 unreachable!()
             }
             Directional::Forward(NetworkMessage::ConnectTo(next)) => {
+                info!("Received connect to, connection to: {:?}", next);
                 let new_forward_stream = start_forward_connection(next, cancellation_token).await?;
                 *forward_stream = Some(new_forward_stream);
                 Ok(())
@@ -124,34 +125,42 @@ async fn tor_node(
     }
 
     loop {
-        let forward_recv = async {
-            match &mut forward {
-                Some((_, receiver)) => Some(receiver.recv().await),
-                None => None,
-            }
-        };
-        tokio::select! {
-            forward_msg = forward_recv => {
-                if let Some(forward_msg) = forward_msg.flatten() {
-
-                info!("Received message from front");
-                // Read from the front: direction is backward
-                    if let Err(err) = handle_message(&mut circuit_manager, Directional::Back(forward_msg), &mut forward, &mut back_write, &cancellation).await {
-                        error!("{:?}",err);
+        if let Some((_, ref mut forward_receiver)) = &mut forward {
+            tokio::select! {
+                Some(forward_msg) = forward_receiver.recv() => {
+                    info!("Received message from front");
+                    // Read from the front: direction is backward
+                        if let Err(err) = handle_message(&mut circuit_manager, Directional::Back(forward_msg), &mut forward, &mut back_write, &cancellation).await {
+                            error!("{:?}",err);
+                            break
+                    }
+                },
+                Some(back_msg) = back_receiver.recv() => {
+                    info!("Received message from back");
+                    // Read from the back: direction is forward
+                    if let Err(err) = handle_message(&mut circuit_manager, Directional::Forward(back_msg), &mut forward, &mut back_write, &cancellation).await {
+                        error!("Failed sending message: {:?}",err);
                         break
                     }
+                },
+                else => {
+                    break;
                 }
-            },
-            Some(back_msg) = back_receiver.recv() => {
-                info!("Received message from back");
-                // Read from the back: direction is forward
-                if let Err(err) = handle_message(&mut circuit_manager, Directional::Forward(back_msg), &mut forward, &mut back_write, &cancellation).await {
-                    error!("Failed sending message: {:?}",err);
-                    break
+            }
+        } else {
+            tokio::select! {
+
+                Some(back_msg) = back_receiver.recv() => {
+                    info!("Received message from back");
+                    // Read from the back: direction is forward
+                    if let Err(err) = handle_message(&mut circuit_manager, Directional::Forward(back_msg), &mut forward, &mut back_write, &cancellation).await {
+                        error!("Failed sending message: {:?}",err);
+                        break
+                    }
+                },
+                else => {
+                    break;
                 }
-            },
-            else => {
-                break;
             }
         }
     }

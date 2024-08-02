@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use serde::Serialize;
 
 use super::tor_message::{NetworkMessage, Next, TorMessage};
@@ -143,6 +141,19 @@ mod tests {
 
         let bob = bob.handshake(alice_pub);
 
+        let next_bytes = bincode::serialize(&NEXT_NODE)?;
+        let next_encrypted = bob.encrypt(&next_bytes);
+
+        let next_node_reponse =
+            circuit_manager.message(Directional::Forward(TorMessage::NextNode {
+                next_encrypted,
+            }))?;
+
+        assert!(matches!(
+            next_node_reponse,
+            Directional::Forward(NetworkMessage::ConnectTo(NEXT_NODE))
+        ));
+
         let message = TorMessage::NotForYou {
             data: bob.encrypt(&bincode::serialize(&move_along)?[..]),
         };
@@ -166,6 +177,19 @@ mod tests {
             CircuitManager::handshook(bob.initial_public_message());
 
         let bob = bob.handshake(alice_pub);
+
+        let next_bytes = bincode::serialize(&NEXT_SERVER)?;
+        let next_encrypted = bob.encrypt(&next_bytes);
+
+        let next_node_reponse =
+            circuit_manager.message(Directional::Forward(TorMessage::NextNode {
+                next_encrypted,
+            }))?;
+
+        assert!(matches!(
+            next_node_reponse,
+            Directional::Forward(NetworkMessage::ConnectTo(NEXT_SERVER))
+        ));
 
         let message = TorMessage::NotForYou {
             data: bob.encrypt(&data[..]),

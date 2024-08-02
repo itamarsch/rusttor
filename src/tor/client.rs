@@ -1,7 +1,10 @@
+use log::info;
 use std::{iter, net::SocketAddr};
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 
+use crate::tor::node;
+use crate::tor::onion::onion_wrap_connect_to;
 use crate::{
     encryption::{Encryptor, KeyPair},
     node_io::NodeIO,
@@ -55,6 +58,7 @@ pub async fn nodes_handshake(
             .map(|a| a.unwrap())
             .collect::<Vec<_>>();
 
+        info!("Waiting for handshake");
         let TorMessage::HandShake(other_pubkey) =
             decrypt_onion_layers(&encrypted_nodes[..], reader.read().await?)?
         else {
@@ -64,6 +68,10 @@ pub async fn nodes_handshake(
         let (encryptor, _) = &mut nodes[i];
 
         *encryptor = Some(my_pubkey.handshake(other_pubkey));
+
+        writer
+            .node_write(onion_wrap_connect_to(&nodes[..]).unwrap())
+            .await?;
     }
 
     let reader_nodes = nodes
