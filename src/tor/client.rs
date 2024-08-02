@@ -3,7 +3,6 @@ use std::{iter, net::SocketAddr};
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 
-use crate::tor::node;
 use crate::tor::onion::onion_wrap_connect_to;
 use crate::{
     encryption::{Encryptor, KeyPair},

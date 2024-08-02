@@ -67,6 +67,7 @@ impl Connect<()> for TorConnect {
         destination: SocksSocketAddr,
         _: (),
     ) -> gerevs::Result<Self::ServerConnection> {
+        println!("New connection: {:?}", destination);
         let destination = &*destination.to_socket_addr().await?;
         let (reader, writer) = nodes_handshake(
             vec![NODE1, NODE2, NODE3, NODE4, NODE5, NODE6],
@@ -122,6 +123,8 @@ impl Connect<()> for TorConnect {
                     })?;
                 }
             });
+        drop(server_to_client);
+        drop(client_to_server);
 
         Ok(())
     }
