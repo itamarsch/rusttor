@@ -24,7 +24,7 @@ pub fn onion_wrap_tor_message(
             }
         })
 }
-pub fn onion_wrap_packet(nodes: &[(Encryptor, Next)], data: Vec<u8>) -> Option<TorMessage> {
+pub fn onion_wrap_packet(nodes: &[(Encryptor, Next)], data: &[u8]) -> Option<TorMessage> {
     let nodes = nodes
         .iter()
         .map(|(encryptor, next)| (Some(encryptor), *next))
@@ -32,7 +32,7 @@ pub fn onion_wrap_packet(nodes: &[(Encryptor, Next)], data: Vec<u8>) -> Option<T
 
     onion_wrap_tor_message(&nodes[..], |encryptor, next| {
         assert!(next.is_server());
-        let data = encryptor.unwrap().encrypt(&data[..]);
+        let data = encryptor.unwrap().encrypt(data);
         TorMessage::NotForYou { data }
     })
 }
@@ -124,7 +124,7 @@ mod tests {
         ];
         let data = b"test data".to_vec();
 
-        let result = onion_wrap_packet(nodes, data.clone());
+        let result = onion_wrap_packet(nodes, &data[..]);
         assert!(result.is_some());
 
         let message: TorMessage = result.unwrap();

@@ -95,7 +95,7 @@ impl<T> TorClient<T>
 where
     T: AsyncWrite + Unpin,
 {
-    pub async fn write(&mut self, data: Vec<u8>) -> anyhow::Result<()> {
+    pub async fn write(&mut self, data: &[u8]) -> anyhow::Result<()> {
         self.stream
             .node_write(onion_wrap_packet(&self.nodes[..], data).expect("Isn't empty"))
             .await?;

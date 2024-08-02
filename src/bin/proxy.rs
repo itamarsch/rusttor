@@ -103,7 +103,7 @@ impl Connect<()> for TorConnect {
                     if n == 0 {
                         break;
                     }
-                    server_writer.write(buf[..n].to_vec()).await.map_err(|_| {
+                    server_writer.write(&buf[..n]).await.map_err(|_| {
                         Socks5Error::IoError(io::ErrorKind::ConnectionAborted.into())
                     })?;
                 }

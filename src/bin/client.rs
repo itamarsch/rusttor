@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         for i in 1..20 {
             let message = format!("Hello {}", i);
-            writer.write(message.as_bytes().to_vec()).await.unwrap();
+            writer.write(message.as_bytes()).await.unwrap();
         }
     });
 

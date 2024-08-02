@@ -74,7 +74,7 @@ async fn end_to_end() -> anyhow::Result<()> {
     info!("Finised handshake with node2!");
 
     let message = "Hello";
-    writer.write(message.as_bytes().to_vec()).await?;
+    writer.write(message.as_bytes()).await?;
 
     let message = reader.read().await?;
     let message = String::from_utf8(message)?;
