@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn handle_connection(client: TcpStream) -> gerevs::Result<()> {
-    let mut socks5_stream = Socks5Socket::new(
+    let socks5_stream = Socks5Socket::new(
         client,
         NoAuthAuthenticator,
         TorConnect,

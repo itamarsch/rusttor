@@ -1,36 +1,30 @@
 use crate::encryption::{Encryptor, PublicKeyBytes};
 
-use super::tor_message::{MoveAlongMessage, Next, TorMessage};
+use super::tor_message::{Next, TorMessage};
 
 pub fn onion_wrap_tor_message(
     nodes: &[(Option<&Encryptor>, Next)],
     tor_message_build: impl Fn(Option<&Encryptor>, Next) -> TorMessage,
-) -> Option<MoveAlongMessage> {
+) -> Option<TorMessage> {
     nodes
         .iter()
         .rev()
         .fold(None, |message, (encryptor, next)| match message {
             None => {
                 let tor_message = tor_message_build(*encryptor, *next);
-                Some(MoveAlongMessage {
-                    next: *next,
-                    data: tor_message,
-                })
+                Some(tor_message)
             }
             Some(curr_message) => {
                 let curr_message_bytes = bincode::serialize(&curr_message).unwrap();
                 let curr_message_encrypted =
                     encryptor.as_ref().unwrap().encrypt(&curr_message_bytes);
-                Some(MoveAlongMessage {
-                    next: *next,
-                    data: TorMessage::NotForYou {
-                        data: curr_message_encrypted,
-                    },
+                Some(TorMessage::NotForYou {
+                    data: curr_message_encrypted,
                 })
             }
         })
 }
-pub fn onion_wrap_packet(nodes: &[(Encryptor, Next)], data: Vec<u8>) -> Option<MoveAlongMessage> {
+pub fn onion_wrap_packet(nodes: &[(Encryptor, Next)], data: Vec<u8>) -> Option<TorMessage> {
     let nodes = nodes
         .iter()
         .map(|(encryptor, next)| (Some(encryptor), *next))
@@ -47,7 +41,7 @@ pub fn onion_wrap_handshake(
     nodes: &[(Option<Encryptor>, Next)],
 
     pubkey: PublicKeyBytes,
-) -> Option<MoveAlongMessage> {
+) -> Option<TorMessage> {
     let nodes = nodes
         .iter()
         .scan(false, |predicate_broken, x| {
@@ -119,16 +113,13 @@ mod tests {
         let result = onion_wrap_packet(nodes, data.clone());
         assert!(result.is_some());
 
-        let message: MoveAlongMessage = result.unwrap();
-        assert_eq!(message.next, BOB_NODE);
-        let TorMessage::NotForYou { data: encrypted } = message.data else {
+        let message: TorMessage = result.unwrap();
+        let TorMessage::NotForYou { data: encrypted } = message else {
             panic!("Message should be Not for you");
         };
 
-        let message: MoveAlongMessage =
-            bincode::deserialize(&alice_encryptor.decrypt(&encrypted)?[..])?;
-        assert_eq!(message.next, SERVER);
-        let TorMessage::NotForYou { data: encrypted } = message.data else {
+        let message: TorMessage = bincode::deserialize(&alice_encryptor.decrypt(&encrypted)?[..])?;
+        let TorMessage::NotForYou { data: encrypted } = message else {
             panic!("Handshake?");
         };
 
@@ -152,19 +143,17 @@ mod tests {
 
         let result = onion_wrap_handshake(nodes, bob.initial_public_message());
 
-        let message: MoveAlongMessage = result.unwrap();
-        assert_eq!(message.next, BOB_NODE);
-        let TorMessage::NotForYou { data: encrypted } = message.data else {
+        let message: TorMessage = result.unwrap();
+        let TorMessage::NotForYou { data: encrypted } = message else {
             panic!("Message should be Not for you");
         };
 
-        let message: MoveAlongMessage =
-            bincode::deserialize(&alice_encryptor.decrypt(&encrypted)?[..])?;
+        let message: TorMessage = bincode::deserialize(&alice_encryptor.decrypt(&encrypted)?[..])?;
 
-        let TorMessage::HandShake(pubkey) = message.data else {
+        let TorMessage::HandShake(pubkey) = message else {
             panic!("Handshake?");
         };
-        assert_eq!(message.next, SERVER);
+
         assert_eq!(pubkey, bob.initial_public_message());
         Ok(())
     }
@@ -176,10 +165,9 @@ mod tests {
 
         let message = onion_wrap_handshake(nodes, bob.initial_public_message()).unwrap();
 
-        let TorMessage::HandShake(pubkey) = message.data else {
+        let TorMessage::HandShake(pubkey) = message else {
             panic!("Handshake?");
         };
-        assert_eq!(message.next, BOB_NODE);
         assert_eq!(pubkey, bob.initial_public_message());
     }
 }

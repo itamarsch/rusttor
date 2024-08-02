@@ -10,9 +10,9 @@ use crate::{
 
 use super::{
     onion::onion_wrap_packet,
-    tor_message::{MoveAlongMessage, Next, TorMessage},
+    tor_message::{Next, TorMessage},
 };
-type NetworkIO<T> = NodeIO<T, TorMessage, MoveAlongMessage>;
+type NetworkIO<T> = NodeIO<T, TorMessage, TorMessage>;
 pub struct TorClient<T> {
     nodes: Vec<(Encryptor, Next)>,
 

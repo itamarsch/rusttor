@@ -1,7 +1,7 @@
 use log::{error, info};
 use serde::de::DeserializeOwned;
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, WriteHalf},
     net::TcpStream,
     sync::mpsc,
 };
@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     circuit_manager::CircuitManager,
-    tor_message::{MoveAlongMessage, Next, TorMessage},
+    tor_message::{Next, TorMessage},
 };
 
 pub async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
@@ -23,16 +23,8 @@ pub async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
     let (back_read, back_write) = tokio::io::split(stream);
     let back_write: NodeIO<_, (), TorMessage> = NodeIO::new(back_write);
 
-    let mut back_node_reader: NodeIO<_, MoveAlongMessage, ()> = NodeIO::new(back_read);
+    let mut back_node_reader: NodeIO<_, TorMessage, ()> = NodeIO::new(back_read);
     let (back_sender, back_receiver) = mpsc::channel(10);
-
-    let message = back_node_reader.read().await?;
-    let next = message.next;
-
-    back_sender
-        .send(message)
-        .await
-        .expect("Channel isn't closed");
 
     tokio::spawn(reader_task(
         back_node_reader,
@@ -40,12 +32,21 @@ pub async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
         back_sender,
     ));
 
+    tor_node(cancellation_token, back_write, back_receiver).await;
+
+    Ok(())
+}
+
+async fn start_forward_connection(
+    next: Next,
+    cancellation_token: &CancellationToken,
+) -> anyhow::Result<ForwardStream> {
     let (front_read, forward_write) = tokio::io::split(match next {
         Next::Node(n) => TcpStream::connect(n).await?,
         Next::Server(n) => TcpStream::connect(n).await?,
     });
 
-    let front_write: NodeIO<_, (), MoveAlongMessage> = NodeIO::new(forward_write);
+    let front_write: NodeIO<_, (), TorMessage> = NodeIO::new(forward_write);
 
     let (front_sender, front_receiver) = mpsc::channel(10);
 
@@ -63,32 +64,27 @@ pub async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
             front_sender,
         ));
     }
-    tor_node(
-        cancellation_token,
-        front_write,
-        front_receiver,
-        back_write,
-        back_receiver,
-    )
-    .await;
-
-    Ok(())
+    Ok((front_write, front_receiver))
 }
+type ForwardStream = (
+    NodeIO<tokio::io::WriteHalf<tokio::net::TcpStream>, (), TorMessage>,
+    mpsc::Receiver<TorMessage>,
+);
 
 async fn tor_node(
     cancellation: CancellationToken,
-    mut forward_write: NodeIO<impl AsyncWrite + Unpin, (), MoveAlongMessage>,
-    mut front_receiver: mpsc::Receiver<TorMessage>,
     mut back_write: NodeIO<impl AsyncWrite + Unpin, (), TorMessage>,
-    mut back_receiver: mpsc::Receiver<MoveAlongMessage>,
-) {
+    mut back_receiver: mpsc::Receiver<TorMessage>,
+) -> anyhow::Result<()> {
     let mut circuit_manager = CircuitManager::default();
+    let mut forward: Option<ForwardStream> = None;
 
     async fn handle_message(
         circuit_manager: &mut CircuitManager,
-        message: Directional<MoveAlongMessage, TorMessage>,
-        forward_write: &mut NodeIO<impl AsyncWrite + Unpin, (), MoveAlongMessage>,
+        message: Directional<TorMessage, TorMessage>,
+        forward_stream: &mut Option<ForwardStream>,
         back_write: &mut NodeIO<impl AsyncWrite + Unpin, (), TorMessage>,
+        cancellation_token: &CancellationToken,
     ) -> anyhow::Result<()> {
         let a = circuit_manager.message(message)?;
         match a {
@@ -100,31 +96,56 @@ async fn tor_node(
                 info!("Writing backward: Handshake");
                 back_write.node_write(m).await
             }
+            Directional::Back(m @ TorMessage::NextNode { .. }) => {
+                unreachable!()
+            }
+            Directional::Forward(NetworkMessage::ConnectTo(next)) => {
+                let new_forward_stream = start_forward_connection(next, cancellation_token).await?;
+                *forward_stream = Some(new_forward_stream);
+                Ok(())
+            }
             Directional::Forward(NetworkMessage::TorMessage(m)) => {
                 info!("Writing forward: TorMessage");
-                forward_write.node_write(m).await
+                if let Some((forward_write, _)) = forward_stream {
+                    forward_write.node_write(m).await
+                } else {
+                    anyhow::bail!("Not connected forward and received message forward")
+                }
             }
             Directional::Forward(NetworkMessage::ServerMessage(data)) => {
                 info!("Writing to server: ");
-                forward_write.write_raw(&data).await
+                if let Some((forward_write, _)) = forward_stream {
+                    forward_write.write_raw(&data).await
+                } else {
+                    anyhow::bail!("Not connected forward and received message forward")
+                }
             }
         }
     }
 
     loop {
+        let forward_recv = async {
+            match &mut forward {
+                Some((_, receiver)) => Some(receiver.recv().await),
+                None => None,
+            }
+        };
         tokio::select! {
-            Some(forward_msg) = front_receiver.recv() => {
+            forward_msg = forward_recv => {
+                if let Some(forward_msg) = forward_msg.flatten() {
+
                 info!("Received message from front");
                 // Read from the front: direction is backward
-                if let Err(err) = handle_message(&mut circuit_manager, Directional::Back(forward_msg), &mut forward_write, &mut back_write).await {
-                    error!("{:?}",err);
-                    break
+                    if let Err(err) = handle_message(&mut circuit_manager, Directional::Back(forward_msg), &mut forward, &mut back_write, &cancellation).await {
+                        error!("{:?}",err);
+                        break
+                    }
                 }
             },
             Some(back_msg) = back_receiver.recv() => {
                 info!("Received message from back");
                 // Read from the back: direction is forward
-                if let Err(err) = handle_message(&mut circuit_manager, Directional::Forward(back_msg), &mut forward_write, &mut back_write).await {
+                if let Err(err) = handle_message(&mut circuit_manager, Directional::Forward(back_msg), &mut forward, &mut back_write, &cancellation).await {
                     error!("Failed sending message: {:?}",err);
                     break
                 }
@@ -135,6 +156,7 @@ async fn tor_node(
         }
     }
     cancellation.cancel();
+    Ok(())
 }
 
 async fn server_reader_task(

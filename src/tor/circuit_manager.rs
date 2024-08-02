@@ -1,6 +1,8 @@
+use std::net::SocketAddr;
+
 use serde::Serialize;
 
-use super::tor_message::{MoveAlongMessage, NetworkMessage, Next, TorMessage};
+use super::tor_message::{NetworkMessage, Next, TorMessage};
 use crate::encryption::Encryptor;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -13,25 +15,23 @@ where
     Forward(F),
 }
 
-pub type IncomingMessage = Directional<MoveAlongMessage, TorMessage>;
-pub type OutgoingMessage = Directional<NetworkMessage<MoveAlongMessage>, TorMessage>;
+pub type IncomingMessage = Directional<TorMessage, TorMessage>;
+pub type OutgoingMessage = Directional<NetworkMessage<TorMessage>, TorMessage>;
 
 #[derive(Default)]
 pub struct CircuitManager {
     encryptor: Option<Encryptor>,
+    next: Option<Next>,
 }
 
 impl CircuitManager {
     pub fn message(&mut self, message: IncomingMessage) -> anyhow::Result<OutgoingMessage> {
         match message {
-            Directional::Forward(MoveAlongMessage {
-                data: TorMessage::HandShake(public_key),
-                ..
-            }) => self.handshake(public_key),
-            Directional::Forward(MoveAlongMessage {
-                data: TorMessage::NotForYou { data },
-                next,
-            }) => self.push_onward(data, next),
+            Directional::Forward(TorMessage::HandShake(public_key)) => self.handshake(public_key),
+            Directional::Forward(TorMessage::NotForYou { data }) => self.push_onward(data),
+            Directional::Forward(TorMessage::NextNode { next_encrypted }) => {
+                self.connect(&next_encrypted[..])
+            }
             Directional::Back(message) => self.push_response_back(message),
         }
     }
@@ -48,13 +48,23 @@ impl CircuitManager {
         Ok(Directional::Back(TorMessage::HandShake(my_public)))
     }
 
-    pub fn push_onward(
-        &mut self,
-        onioned_data: Vec<u8>,
-        next: Next,
-    ) -> anyhow::Result<OutgoingMessage> {
+    pub fn connect(&mut self, encrypted_addr: &[u8]) -> anyhow::Result<OutgoingMessage> {
         let Some(ref encryptor) = &self.encryptor else {
             anyhow::bail!("received notforyou before handshake")
+        };
+
+        let addr = encryptor.decrypt(encrypted_addr)?;
+        let addr: Next = bincode::deserialize(&addr[..])?;
+        self.next = Some(addr);
+        Ok(Directional::Forward(NetworkMessage::ConnectTo(addr)))
+    }
+
+    pub fn push_onward(&mut self, onioned_data: Vec<u8>) -> anyhow::Result<OutgoingMessage> {
+        let Some(ref encryptor) = &self.encryptor else {
+            anyhow::bail!("received notforyou before handshake")
+        };
+        let Some(next) = &self.next else {
+            anyhow::bail!("received notforyou before connect")
         };
 
         let deonionized = encryptor.decrypt(&onioned_data[..])?;
@@ -93,7 +103,7 @@ mod tests {
         encryption::{Encryptor, KeyPair, PublicKeyBytes},
         tor::{
             circuit_manager::Directional,
-            tor_message::{MoveAlongMessage, NetworkMessage, Next, TorMessage},
+            tor_message::{NetworkMessage, Next, TorMessage},
         },
     };
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -105,6 +115,7 @@ mod tests {
             (
                 CircuitManager {
                     encryptor: Some(encryptor),
+                    next: None,
                 },
                 my_public,
             )
@@ -123,10 +134,7 @@ mod tests {
 
     #[test]
     fn node_forward_message() -> anyhow::Result<()> {
-        let move_along = MoveAlongMessage {
-            next: NEXT_NODE,
-            data: TorMessage::NotForYou { data: vec![1] },
-        };
+        let move_along = TorMessage::NotForYou { data: vec![1] };
 
         let bob = KeyPair::default();
 
@@ -135,11 +143,8 @@ mod tests {
 
         let bob = bob.handshake(alice_pub);
 
-        let message = MoveAlongMessage {
-            data: TorMessage::NotForYou {
-                data: bob.encrypt(&bincode::serialize(&move_along)?[..]),
-            },
-            next: NEXT_NODE,
+        let message = TorMessage::NotForYou {
+            data: bob.encrypt(&bincode::serialize(&move_along)?[..]),
         };
 
         let Directional::Forward(NetworkMessage::TorMessage(result)) =
@@ -162,11 +167,8 @@ mod tests {
 
         let bob = bob.handshake(alice_pub);
 
-        let message = MoveAlongMessage {
-            data: TorMessage::NotForYou {
-                data: bob.encrypt(&data[..]),
-            },
-            next: NEXT_SERVER,
+        let message = TorMessage::NotForYou {
+            data: bob.encrypt(&data[..]),
         };
 
         let Directional::Forward(NetworkMessage::ServerMessage(result)) =
@@ -184,10 +186,7 @@ mod tests {
 
         // Send handshake message forward
         let bob = KeyPair::default();
-        let handshake = MoveAlongMessage {
-            data: TorMessage::HandShake(bob.initial_public_message()),
-            next: NEXT_NODE,
-        };
+        let handshake = TorMessage::HandShake(bob.initial_public_message());
 
         let Directional::Back(TorMessage::HandShake(pubkey)) =
             circuit_manager.message(Directional::Forward(handshake))?

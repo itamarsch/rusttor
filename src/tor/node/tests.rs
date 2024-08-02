@@ -16,7 +16,7 @@ use crate::{
     tor::{
         client::{nodes_handshake, TorClient},
         onion::{decrypt_onion_layers, onion_wrap_handshake, onion_wrap_packet},
-        tor_message::{MoveAlongMessage, Next, TorMessage},
+        tor_message::{Next, TorMessage},
     },
 };
 

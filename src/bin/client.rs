@@ -1,10 +1,7 @@
-use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::{Arc, Mutex},
-};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use log::info;
-use rustor::tor::client::{nodes_handshake, TorClient};
+use rustor::tor::client::nodes_handshake;
 
 macro_rules! localhost {
     ($name:ident,$port:expr) => {

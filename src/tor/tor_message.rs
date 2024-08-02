@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum TorMessage {
     NotForYou { data: Vec<u8> },
+    NextNode { next_encrypted: Vec<u8> },
     HandShake([u8; 32]),
 }
 
@@ -26,9 +27,5 @@ impl Next {
 pub enum NetworkMessage<T> {
     TorMessage(T),
     ServerMessage(Vec<u8>),
-}
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct MoveAlongMessage {
-    pub next: Next,
-    pub data: TorMessage,
+    ConnectTo(Next),
 }
