@@ -16,7 +16,10 @@ tmux select-pane -t 5
 tmux split-window -v
 
 tmux select-pane -t 7
-tmux split-window -v
+if [ "$1" == "test" ]; then
+	tmux split-window -v
+fi
+
 LOG=debug
 for i in {1..6}; do
 	port=$((10000 + i - 1))
@@ -25,5 +28,10 @@ for i in {1..6}; do
 done
 
 sleep 2
-tmux send-keys -t 7 "clear && RUST_LOG=$LOG cargo run -q --bin client" C-m
-tmux send-keys -t 8 "python3 ./src/tor/node/test_server.py 12345" C-m
+
+if [ "$1" == "test" ]; then
+	tmux send-keys -t 7 "clear && RUST_LOG=$LOG cargo run -q --bin client" C-m
+	tmux send-keys -t 8 "python3 ./src/tor/node/test_server.py 12345" C-m
+else
+	tmux send-keys -t 7 "clear && RUST_LOG=$LOG cargo run -q --bin proxy" C-m
+fi
