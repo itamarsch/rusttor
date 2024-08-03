@@ -1,6 +1,6 @@
 use clap::Parser;
 use log::info;
-use rustor::tor::node::handle_connection;
+use rustor::tor::{node::handle_connection, node_directory::add_node};
 use tokio::net::TcpListener;
 
 #[derive(clap::Parser)]
@@ -17,6 +17,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port)).await?;
+    let local_addr = listener.local_addr()?;
+    add_node(&local_addr).await?;
 
     let local_addr = listener.local_addr()?;
     println!("Listening on {}", local_addr);

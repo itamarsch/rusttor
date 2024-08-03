@@ -20,8 +20,13 @@ if [ "$1" == "test" ]; then
 	tmux split-window -v
 fi
 
-LOG=debug
-for i in {1..6}; do
+LOG=debug,hyper=info
+
+tmux select-pane -t 1
+tmux send-keys "clear && RUST_LOG=debug cargo run -q --bin node_directory" C-m
+sleep 2
+
+for i in {2..6}; do
 	port=$((10000 + i - 1))
 	tmux select-pane -t $i
 	tmux send-keys "clear && RUST_LOG=$LOG cargo run -q --bin node -- -p $port" C-m
